@@ -379,6 +379,7 @@ public class Player {
             locker.lock();
 
             try {
+                // resets the song frame
                 currentFrame = 0;
                 device = FactoryRegistry.systemRegistry().createAudioDevice();
                 device.open(decoder = new Decoder());
@@ -387,19 +388,20 @@ public class Player {
             catch (JavaLayerException | FileNotFoundException e) {
             }
 
+            // calculates the new time with the scrubber position
             int newTime = (int) (window.getScrubberValue() / currentSong.getMsPerFrame());
             count = newTime;
 
-            window.setTime((int) (count * currentSong.getMsPerFrame()), totalSongTime);
+            window.setTime((int) (count * currentSong.getMsPerFrame()), totalSongTime); // updates song time
 
             try {
-                skipToFrame(newTime);
+                skipToFrame(newTime); // skips to the right frame
 
             } catch (BitstreamException e){
                 System.out.println(e);
             }
 
-            if (isPlaying) {isPaused = previousScrubberState;}
+            if (isPlaying) {isPaused = previousScrubberState;} // get previous playing state
         } finally {
             locker.unlock();
         }
