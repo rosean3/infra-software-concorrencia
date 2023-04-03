@@ -40,6 +40,7 @@ public class Player {
 
     private boolean isPlaying = false;
     private boolean isPaused = false;
+    private boolean previousScrubberState = false;
     private boolean stopPlaying = false;
 
     private int currentFrame = 0;
@@ -61,17 +62,19 @@ public class Player {
     private final ActionListener buttonListenerAddSong = e -> addSong();
     private final ActionListener buttonListenerPlayPause = e -> pauseSong();
     private final ActionListener buttonListenerStop = e -> stopSong();
-    private final ActionListener buttonListenerNext = e -> {};
-    private final ActionListener buttonListenerPrevious = e -> {};
+    private final ActionListener buttonListenerNext = e -> nextSong();
+    private final ActionListener buttonListenerPrevious = e -> previousSong();
     private final ActionListener buttonListenerShuffle = e -> {};
     private final ActionListener buttonListenerLoop = e -> {};
     private final MouseInputAdapter scrubberMouseInputAdapter = new MouseInputAdapter() {
         @Override
         public void mouseReleased(MouseEvent e) {
+            releasedScrubber();
         }
 
         @Override
         public void mousePressed(MouseEvent e) {
+            pressedScrubber();
         }
 
         @Override
@@ -142,22 +145,29 @@ public class Player {
     }
 
     public int getSongIndex() {
-        String selectedSong = window.getSelectedSong();
+        String selectedSong = window.getSelectedSong(); // gets the selected song UUID in the user interface
 
-        for (int i = 0; i < songs.size(); i++) {
+        for (int i = 0; i < songs.size(); i++) { // iterate through the song list to find which song has the same UUID
             if (songs.get(i).getUuid() == selectedSong) {
-                return i;
+                return i; // returns its index
             }
         }
 
-        return 0;
+        return 0; // returns 0 in case no song is selected
     }
 
     public void queue()
     {
-        String[][] data = new String[this.songsData.size()][7];
-        this.playlist = this.songsData.toArray(data);
-        window.setQueueList(this.playlist);
+        try {
+            locker.lock();
+
+            String[][] data = new String[this.songsData.size()][7];
+            this.playlist = this.songsData.toArray(data);
+            window.setQueueList(this.playlist);
+        } finally {
+            locker.unlock();
+        }
+
     }
 
     public void songLoop()
@@ -177,21 +187,27 @@ public class Player {
                             break;
                         }
 
+                        // updates song time info with the current time and total time, respectively
                         currentSongTime = (int) (count * currentSong.getMsPerFrame());
                         totalSongTime = (int) currentSong.getMsLength();
                         window.setTime(currentSongTime, totalSongTime);
 
-                        if (window.getScrubberValue() < currentSong.getMsLength()) //while song's not ended yet
-                        {isPlaying= playNextFrame();}
+                        if (window.getScrubberValue() < currentSong.getMsLength())
+                        {isPlaying = playNextFrame();}
                         else
-                        {stopSong();}
+                        {
+                            // verifies if there are any songs left to play in the playlist
+                            if (songIndex < songs.size()) {
+                                nextSong(); // if so, plays the next one
+                            } else {stopSong();} // else, stops playing
+                        }
                         count++;
                     }
                     catch (JavaLayerException e) {}
                 }
 
                 if(stopPlaying)
-                {
+                {   // resets the player states
                     stopPlaying = false;
                     isPaused = false;
                     break;
@@ -204,7 +220,7 @@ public class Player {
 
     public void play() {
         songIndex = getSongIndex();
-        playSong(songIndex);
+        playSong(songIndex); // gets the selected song index and calls the function that plays the song
     }
 
     public void playSong(int songIndex)
@@ -212,7 +228,7 @@ public class Player {
         currentFrame = 0;
         count = 0;
 
-        if (isPlaying) stopPlaying = true;
+        if (isPlaying) stopPlaying = true; // interrupts the current song before playing another
 
         try
         {
@@ -221,20 +237,26 @@ public class Player {
             isPlaying = true;
             currentSong = songs.get(songIndex);
 
+            // setting the current song info to the window
             window.setPlayingSongInfo(currentSong.getTitle(), currentSong.getAlbum(), currentSong.getArtist());
+
+            // enabling ui buttons according to its conditions
             window.setPlayPauseButtonIcon(isPaused ? 0 : 1);
-            window.setEnabledScrubber(isPlaying); //**
+            window.setEnabledScrubber(isPlaying);
             window.setEnabledPlayPauseButton(isPlaying);
             window.setEnabledStopButton(isPlaying);
+            window.setEnabledNextButton(isPlaying && songIndex < songs.size() - 1);
+            window.setEnabledPreviousButton(isPlaying && songIndex != 0);
 
             isPaused = false;
 
             try
             {
+                // getting audio service
                 device = FactoryRegistry.systemRegistry().createAudioDevice();
                 device.open(decoder = new Decoder());
                 bitstream = new Bitstream(currentSong.getBufferedInputStream());
-                songLoop();
+                songLoop(); // starting the playing loop
             }
             catch (JavaLayerException | FileNotFoundException e) {}
         }
@@ -248,15 +270,16 @@ public class Player {
         {
             locker.lock();
 
-            int songToRemoveIndex = getSongIndex();
+            int songToRemoveIndex = getSongIndex(); // gets selected song index
 
-            if(songToRemoveIndex == songIndex) {stopSong();}
-            if(songToRemoveIndex < songToRemoveIndex) {songIndex--;}
+            if(songToRemoveIndex == songIndex) {stopSong();} // if the selected song is playing right now, stops it
+            if(songToRemoveIndex < songIndex) {songIndex--;} // else, updates the playing song index
 
+            // removes the song from songs and songs data lists
             songs.remove(songToRemoveIndex);
             songsData.remove(songToRemoveIndex);
 
-            queue();
+            queue(); // re-queue the songs list
         }
         finally {
             locker.unlock();
@@ -275,6 +298,7 @@ public class Player {
 
             String [] songData = newSong.getDisplayInfo();
             songsData.add(songData);
+
             queue();
         }
         catch (IOException | BitstreamException | UnsupportedTagException | InvalidDataException exception) {}
@@ -285,18 +309,101 @@ public class Player {
     }
 
     public void pauseSong() {
-        isPlaying = isPaused;
-        isPaused = !isPaused;
+        try {
+            locker.lock();
+            isPlaying = isPaused;
+            isPaused = !isPaused; // inverts both variables values
 
-        window.setPlayPauseButtonIcon(isPaused ? 0 : 1);
+            window.setPlayPauseButtonIcon(isPaused ? 0 : 1); // sets the play button active
+        }
+        finally {
+            locker.unlock();
+        }
+
     }
 
     public void stopSong() {
-        isPlaying = false;
-        stopPlaying = true;
-        count = 0;
+        try {
+            locker.lock();
+            isPlaying = false;
+            stopPlaying = true;
+            count = 0; // resets all code play states
 
-        window.resetMiniPlayer();
+            window.resetMiniPlayer(); // resets the player states
+        }
+        finally {
+            locker.unlock();
+        }
     }
+
+    public void nextSong() {
+        try {
+            locker.lock();
+
+            if (songIndex < songs.size() - 1) { //verifies if the current song is the last in the list
+                playSong(songIndex + 1);
+                songIndex++; // if not, plays the song immediately after to the current and increments one to songIndex
+            }
+        } finally {
+            locker.lock();
+        }
+    }
+
+    public void previousSong() {
+        try {
+            locker.lock();
+
+            if (songIndex != 0) { //verifies if the current song is the first in the list
+                playSong(songIndex - 1);
+                songIndex--; // if not, plays the song immediately before to the current and decrements one to songIndex
+            }
+        } finally {
+            locker.lock();
+        }
+    }
+
+    public void pressedScrubber() {
+        try {
+            locker.lock();
+
+            // saves the previous state of isPaused and pauses the song
+            previousScrubberState = isPaused;
+            isPaused = true;
+        } finally {
+            locker.unlock();
+        }
+    }
+
+    public void releasedScrubber() {
+        try {
+            locker.lock();
+
+            try {
+                currentFrame = 0;
+                device = FactoryRegistry.systemRegistry().createAudioDevice();
+                device.open(decoder = new Decoder());
+                bitstream = new Bitstream(currentSong.getBufferedInputStream());
+            }
+            catch (JavaLayerException | FileNotFoundException e) {
+            }
+
+            int newTime = (int) (window.getScrubberValue() / currentSong.getMsPerFrame());
+            count = newTime;
+
+            window.setTime((int) (count * currentSong.getMsPerFrame()), totalSongTime);
+
+            try {
+                skipToFrame(newTime);
+
+            } catch (BitstreamException e){
+                System.out.println(e);
+            }
+
+            if (isPlaying) {isPaused = previousScrubberState;}
+        } finally {
+            locker.unlock();
+        }
+    }
+
     //</editor-fold>
 }
