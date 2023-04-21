@@ -23,6 +23,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class Player {
 
+    //<editor-fold desc="Essentials">
     /**
      * The MPEG audio bitstream.
      */
@@ -38,25 +39,42 @@ public class Player {
 
     private PlayerWindow window;
 
+    //</editor-fold>
+
+    //<editor-fold desc="Setting necessary booleans">
     private boolean isPlaying = false;
     private boolean isPaused = false;
-    private boolean previousScrubberState = false;
     private boolean stopPlaying = false;
 
+    private boolean statePreviousToScrubberAction = false;
+
+    private boolean shuffling = false;
+
+    private boolean isLooping = false;
+    //</editor-fold>
+
+    //<editor-fold desc="Miscellaneous variables and constant">
     private int currentFrame = 0;
     private int count = 0;
     private int songIndex;
-
     private Song currentSong;
-    private ArrayList<Song> songs = new ArrayList<>();
-    private ArrayList<String[]> songsData = new ArrayList<>();
-    private String [][] playlist = {};
-
     private int currentSongTime;
     private int totalSongTime;
-
     private final Lock locker = new ReentrantLock();
+    //</editor-fold>
 
+
+    //<editor-fold desc="Arrays and lists">
+    private ArrayList<Song> songs = new ArrayList<>();
+    private ArrayList<String[]> songsData = new ArrayList<>();
+
+    private ArrayList<Song> auxShuffleArray = new ArrayList<>();
+
+    private ArrayList<String[]> auxShuffleArrayData = new ArrayList<>();
+    private String [][] playlist = {};
+    //</editor-fold>
+
+    //<editor-fold desc="Action Listeners">
     private final ActionListener buttonListenerPlayNow = e -> play();
     private final ActionListener buttonListenerRemove = e -> removeSong();
     private final ActionListener buttonListenerAddSong = e -> addSong();
@@ -64,8 +82,11 @@ public class Player {
     private final ActionListener buttonListenerStop = e -> stopSong();
     private final ActionListener buttonListenerNext = e -> nextSong();
     private final ActionListener buttonListenerPrevious = e -> previousSong();
-    private final ActionListener buttonListenerShuffle = e -> {};
-    private final ActionListener buttonListenerLoop = e -> {};
+    private final ActionListener buttonListenerShuffle = e -> shuffleSongs();
+    private final ActionListener buttonListenerLoop = e -> loopSongs();
+    //</editor-fold>
+
+    //<editor-fold desc="Mouse Adapter">
     private final MouseInputAdapter scrubberMouseInputAdapter = new MouseInputAdapter() {
         @Override
         public void mouseReleased(MouseEvent e) {
@@ -81,7 +102,9 @@ public class Player {
         public void mouseDragged(MouseEvent e) {
         }
     };
+    //</editor-fold>
 
+    //<editor-fold desc="Player">
     public Player() {
         EventQueue.invokeLater(() -> window = new PlayerWindow(
                 "Mengão player",
@@ -97,9 +120,13 @@ public class Player {
                 buttonListenerLoop,
                 scrubberMouseInputAdapter)
         );
+        // change the state of the buttons to true, because you can choose to loop and to shuffle even before playing any songs
+        EventQueue.invokeLater(() -> window.setEnabledLoopButton(true));
+        EventQueue.invokeLater(() -> window.setEnabledShuffleButton(true));
     }
+    //</editor-fold>
 
-    //<editor-fold desc="Essential">
+    //<editor-fold desc="Functions">
 
     /**
      * @return False if there are no more frames to play.
@@ -156,7 +183,7 @@ public class Player {
         return 0; // returns 0 in case no song is selected
     }
 
-    public void queue()
+    public void queue() //
     {
         try {
             locker.lock();
@@ -197,9 +224,16 @@ public class Player {
                         else
                         {
                             // verifies if there are any songs left to play in the playlist
-                            if (songIndex < songs.size()) {
+                            if (songIndex < songs.size() - 1) {
                                 nextSong(); // if so, plays the next one
-                            } else {stopSong();} // else, stops playing
+                            } else if (songIndex == songs.size() - 1) {
+                                if (isLooping){ // else, see whether you should loop
+                                    songIndex = 0;
+                                    playSong(songIndex);
+                                }
+                                else{stopSong();} // or whether you should just stop
+
+                            } // else, stops playing
                         }
                         count++;
                     }
@@ -245,7 +279,8 @@ public class Player {
             window.setEnabledScrubber(isPlaying);
             window.setEnabledPlayPauseButton(isPlaying);
             window.setEnabledStopButton(isPlaying);
-            window.setEnabledNextButton(isPlaying && songIndex < songs.size() - 1);
+            // you can skip to the next song even if you're at the end of the list if you have a loop
+            window.setEnabledNextButton(isPlaying && (isLooping || songIndex < songs.size() - 1));
             window.setEnabledPreviousButton(isPlaying && songIndex != 0);
 
             isPaused = false;
@@ -271,6 +306,7 @@ public class Player {
             locker.lock();
 
             int songToRemoveIndex = getSongIndex(); // gets selected song index
+            Song songToBeRemoved = songs.get(songToRemoveIndex);
 
             if(songToRemoveIndex == songIndex) {stopSong();} // if the selected song is playing right now, stops it
             if(songToRemoveIndex < songIndex) {songIndex--;} // else, updates the playing song index
@@ -278,6 +314,10 @@ public class Player {
             // removes the song from songs and songs data lists
             songs.remove(songToRemoveIndex);
             songsData.remove(songToRemoveIndex);
+
+            int shuffleIndex = auxShuffleArray.indexOf(songToBeRemoved);
+            auxShuffleArray.remove(shuffleIndex);
+            auxShuffleArrayData.remove(shuffleIndex);
 
             queue(); // re-queue the songs list
         }
@@ -295,9 +335,11 @@ public class Player {
 
             newSong = window.openFileChooser();
             songs.add(newSong);
+            auxShuffleArray.add(newSong);
 
             String [] songData = newSong.getDisplayInfo();
             songsData.add(songData);
+            auxShuffleArrayData.add(songData);
 
             queue();
         }
@@ -327,6 +369,7 @@ public class Player {
             locker.lock();
             isPlaying = false;
             stopPlaying = true;
+            isPaused = false;
             count = 0; // resets all code play states
 
             window.resetMiniPlayer(); // resets the player states
@@ -341,11 +384,15 @@ public class Player {
             locker.lock();
 
             if (songIndex < songs.size() - 1) { //verifies if the current song is the last in the list
-                playSong(songIndex + 1);
                 songIndex++; // if not, plays the song immediately after to the current and increments one to songIndex
+                playSong(songIndex);
+            }
+            else if (songIndex == songs.size() - 1 && isLooping) {
+                songIndex = 0;
+                playSong(songIndex);
             }
         } finally {
-            locker.lock();
+            locker.unlock();
         }
     }
 
@@ -354,11 +401,11 @@ public class Player {
             locker.lock();
 
             if (songIndex != 0) { //verifies if the current song is the first in the list
-                playSong(songIndex - 1);
-                songIndex--; // if not, plays the song immediately before to the current and decrements one to songIndex
+                songIndex--;
+                playSong(songIndex); // plays the song that is before that in the list
             }
         } finally {
-            locker.lock();
+            locker.unlock();
         }
     }
 
@@ -367,7 +414,7 @@ public class Player {
             locker.lock();
 
             // saves the previous state of isPaused and pauses the song
-            previousScrubberState = isPaused;
+            statePreviousToScrubberAction = isPaused;
             isPaused = true;
         } finally {
             locker.unlock();
@@ -401,11 +448,120 @@ public class Player {
                 System.out.println(e);
             }
 
-            if (isPlaying) {isPaused = previousScrubberState;} // get previous playing state
+            if (isPlaying) {isPaused = statePreviousToScrubberAction;} // get previous playing state
         } finally {
             locker.unlock();
         }
     }
 
+    public void shuffleSongs(){
+        try {
+            locker.lock();
+
+            // changing the state of the logical variable of shuffling
+            shuffling = !shuffling;
+
+            if (isPaused || isPlaying) {
+                Song songPlayingNow = songs.get(songIndex);
+                String[] songPlayingNowData = songsData.get(songIndex);
+                if (shuffling) {
+                    // clearing the data that's in the auxiliary array (which might be shuffled)
+                    auxShuffleArray.clear();
+                    auxShuffleArrayData.clear();
+
+                    // storing the unshuffled data from the original array in case we need to undo the shuffling
+                    auxShuffleArray.addAll(songs);
+                    auxShuffleArrayData.addAll(songsData);
+
+                    // shuffling the original array with the Fisher-Yates shuffle algorithm
+                    for (int i = 0; i < songs.size(); i++) {
+                        int randomIndex =  (int) (Math.random() * (songs.size() - i) + i);
+
+                        Song auxShuffleSong = songs.get(randomIndex);
+                        songs.set(randomIndex, songs.get(i));
+                        songs.set(i, auxShuffleSong);
+
+                        String[] auxShuffleSongData = songsData.get(randomIndex);
+                        songsData.set(randomIndex, songsData.get(i));
+                        songsData.set(i, auxShuffleSongData);
+                    }
+
+                    // putting the song that was playing in the first position
+                    int songPlayingNowNewIndex = songs.indexOf(songPlayingNow);
+                    songs.set(songPlayingNowNewIndex, songs.get(0));
+                    songs.set(0, songPlayingNow);
+
+                    songsData.set(songPlayingNowNewIndex, songsData.get(0));
+                    songsData.set(0, songPlayingNowData);
+
+                    songIndex = 0;
+
+                    queue();
+                }
+                else {
+                    //restore the original order:
+                    songs.clear();
+                    songsData.clear();
+                    songs.addAll(auxShuffleArray);
+                    songsData.addAll(auxShuffleArrayData);
+
+                    // update the index of the song that is currently playing
+                    songIndex = songs.indexOf(songPlayingNow);
+
+                    queue();
+                }
+            }
+            else {
+                if (shuffling) {
+                    // do the same thing as before, only now you don't need to reassign any songs to the position 0, nor do you need to change songIndex
+                    // clearing the data that's in the auxiliary array (which might be shuffled)
+                    auxShuffleArray.clear();
+                    auxShuffleArrayData.clear();
+
+                    // storing the unshuffled data from the original array in case we need to undo the shuffling
+                    auxShuffleArray.addAll(songs);
+                    auxShuffleArrayData.addAll(songsData);
+
+                    // shuffling the original array with the Fisher-Yates shuffle algorithm
+                    for (int i = 0; i < songs.size(); i++) {
+                        int randomIndex =  (int) (Math.random() * (songs.size() - i) + i);
+
+                        Song auxShuffleSong = songs.get(randomIndex);
+                        songs.set(randomIndex, songs.get(i));
+                        songs.set(i, auxShuffleSong);
+
+                        String[] auxShuffleSongData = songsData.get(randomIndex);
+                        songsData.set(randomIndex, songsData.get(i));
+                        songsData.set(i, auxShuffleSongData);
+                    }
+
+                    queue();
+                }
+                else {
+                    //restore the original order:
+                    songs.clear();
+                    songsData.clear();
+                    songs.addAll(auxShuffleArray);
+                    songsData.addAll(auxShuffleArrayData);
+
+                    queue();
+                }
+            }
+        }
+        finally {
+            locker.unlock();
+        }
+    }
+
+    public void loopSongs() {
+        try {
+            locker.lock();
+            isLooping = !isLooping;
+            window.setEnabledNextButton(isPlaying && (isLooping || songIndex < songs.size() - 1));
+        }
+        finally {
+            locker.unlock();
+        }
+    }
     //</editor-fold>
 }
