@@ -121,7 +121,6 @@ public class Player {
                 scrubberMouseInputAdapter)
         );
         // change the state of the buttons to true, because you can choose to loop and to shuffle even before playing any songs
-        EventQueue.invokeLater(() -> window.setEnabledLoopButton(true));
         EventQueue.invokeLater(() -> window.setEnabledShuffleButton(true));
     }
     //</editor-fold>
@@ -319,6 +318,8 @@ public class Player {
             auxShuffleArray.remove(shuffleIndex);
             auxShuffleArrayData.remove(shuffleIndex);
 
+            window.setEnabledLoopButton(!songs.isEmpty());
+
             queue(); // re-queue the songs list
         }
         finally {
@@ -340,6 +341,8 @@ public class Player {
             String [] songData = newSong.getDisplayInfo();
             songsData.add(songData);
             auxShuffleArrayData.add(songData);
+
+            window.setEnabledLoopButton(!songs.isEmpty());
 
             queue();
         }
