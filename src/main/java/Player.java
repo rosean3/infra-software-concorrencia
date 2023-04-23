@@ -343,6 +343,7 @@ public class Player {
             auxShuffleArrayData.add(songData);
 
             window.setEnabledLoopButton(!songs.isEmpty());
+            window.setEnabledNextButton(isPlaying && (isLooping || songIndex < songs.size() - 1));
 
             queue();
         }
