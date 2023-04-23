@@ -451,7 +451,9 @@ public class Player {
                 System.out.println(e);
             }
 
-            if (isPlaying) {isPaused = statePreviousToScrubberAction;} // get previous playing state
+            isPaused = statePreviousToScrubberAction; // get previous playing state
+            isPlaying = !isPaused;
+
         } finally {
             locker.unlock();
         }
@@ -550,6 +552,10 @@ public class Player {
                     queue();
                 }
             }
+
+            // in case you choose the last song in the list and then suffle (it's going to go to the start of the list, so the button
+            // has to be enabled)
+            window.setEnabledNextButton(isPlaying && (isLooping || songIndex < songs.size() - 1));
         }
         finally {
             locker.unlock();
